@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands
 
+
 # ============================================================
 # CONFIGURATION
 # ============================================================
@@ -30,11 +31,44 @@ class VerificationView(discord.ui.View):
         button: discord.ui.Button
     ):
 
+        print(
+            f"📩 Verification requested by "
+            f"{interaction.user} ({interaction.user.id})"
+        )
+
         guild = interaction.guild
         member = interaction.user
 
         if guild is None:
+
+            await interaction.response.send_message(
+                "❌ This can only be used inside a server.",
+                ephemeral=True
+            )
+
             return
+
+        # ====================================================
+        # RESPOND IMMEDIATELY
+        # ====================================================
+
+        try:
+
+            await interaction.response.defer(
+                ephemeral=True
+            )
+
+        except Exception as e:
+
+            print(
+                f"❌ Verification interaction error: {e}"
+            )
+
+            return
+
+        # ====================================================
+        # GET VERIFIED ROLE
+        # ====================================================
 
         verified_role = guild.get_role(
             VERIFIED_ROLE_ID
@@ -42,24 +76,30 @@ class VerificationView(discord.ui.View):
 
         if verified_role is None:
 
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ The Verified role could not be found.",
                 ephemeral=True
             )
 
             return
 
-        # Already verified
+        # ====================================================
+        # ALREADY VERIFIED
+        # ====================================================
+
         if verified_role in member.roles:
 
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "✅ You are already verified!",
                 ephemeral=True
             )
 
             return
 
-        # Give role
+        # ====================================================
+        # GIVE ROLE
+        # ====================================================
+
         try:
 
             await member.add_roles(
@@ -69,29 +109,47 @@ class VerificationView(discord.ui.View):
 
         except discord.Forbidden:
 
-            await interaction.response.send_message(
+            await interaction.followup.send(
+
                 "❌ I cannot give you the Verified role.\n\n"
-                "Make sure KazMod's role is above the "
-                "Verified role.",
+                "Make sure KazMod's role is **above** "
+                "the Verified role.",
+
                 ephemeral=True
             )
 
             return
 
-        except discord.HTTPException:
+        except discord.HTTPException as e:
 
-            await interaction.response.send_message(
-                "❌ Discord returned an error. "
-                "Please try again.",
+            print(
+                f"❌ Verification role error: {e}"
+            )
+
+            await interaction.followup.send(
+
+                "❌ Discord returned an error while "
+                "giving you the role. Please try again.",
+
                 ephemeral=True
             )
 
             return
 
-        await interaction.response.send_message(
+        # ====================================================
+        # SUCCESS
+        # ====================================================
+
+        await interaction.followup.send(
+
             "✅ **Verification successful!**\n\n"
             "You now have access to the server.",
+
             ephemeral=True
+        )
+
+        print(
+            f"✅ {member} was verified."
         )
 
 
@@ -102,24 +160,29 @@ class VerificationView(discord.ui.View):
 class Verification(commands.Cog):
 
     def __init__(self, bot):
-
         self.bot = bot
+
+    # ========================================================
+    # LOAD PERSISTENT VIEW
+    # ========================================================
 
     async def cog_load(self):
 
-        # Make the button work after restarts
         self.bot.add_view(
             VerificationView()
         )
 
+        print(
+            "✅ Verification persistent view registered."
+        )
+
     # ========================================================
-    # CREATE PANEL AFTER BOT IS READY
+    # READY
     # ========================================================
 
     @commands.Cog.listener()
     async def on_ready(self):
 
-        # Prevent duplicates during reconnects
         if getattr(
             self.bot,
             "verification_panel_created",
@@ -133,7 +196,7 @@ class Verification(commands.Cog):
         await self.create_verification_panel()
 
     # ========================================================
-    # CREATE PANEL ONLY ONCE
+    # CREATE VERIFICATION PANEL
     # ========================================================
 
     async def create_verification_panel(self):
@@ -149,7 +212,8 @@ class Verification(commands.Cog):
             )
 
             print(
-                f"❌ Channel ID: {VERIFICATION_CHANNEL_ID}"
+                f"❌ Channel ID: "
+                f"{VERIFICATION_CHANNEL_ID}"
             )
 
             return
@@ -165,11 +229,8 @@ class Verification(commands.Cog):
             ):
 
                 if (
-
                     message.author == self.bot.user
-
                     and message.embeds
-
                     and message.embeds[0].title
                     == "🔐 Server Verification"
                 ):
@@ -188,8 +249,16 @@ class Verification(commands.Cog):
 
             return
 
+        except discord.HTTPException as e:
+
+            print(
+                f"❌ Could not check verification channel: {e}"
+            )
+
+            return
+
         # ====================================================
-        # CREATE PANEL
+        # CREATE EMBED
         # ====================================================
 
         embed = discord.Embed(
@@ -206,7 +275,8 @@ class Verification(commands.Cog):
                 "Click **Verify** below to receive "
                 "your Verified role.\n\n"
 
-                "✅ **Verified** — Gain access to the server."
+                "✅ **Verified** — Gain access "
+                "to the server."
             ),
 
             color=discord.Color.green()
@@ -216,16 +286,35 @@ class Verification(commands.Cog):
             text="KazMod Verification System"
         )
 
-        await channel.send(
+        # ====================================================
+        # SEND PANEL
+        # ====================================================
 
-            embed=embed,
+        try:
 
-            view=VerificationView()
-        )
+            await channel.send(
 
-        print(
-            "✅ Verification panel created."
-        )
+                embed=embed,
+
+                view=VerificationView()
+            )
+
+            print(
+                "✅ Verification panel created."
+            )
+
+        except discord.Forbidden:
+
+            print(
+                "❌ KazMod cannot send messages "
+                "in the verification channel."
+            )
+
+        except discord.HTTPException as e:
+
+            print(
+                f"❌ Could not create verification panel: {e}"
+            )
 
 
 # ============================================================
