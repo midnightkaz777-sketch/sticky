@@ -23,7 +23,6 @@ TICKET_TYPES = {
         "role_id": STAFF_ROLE_ID,
         "emoji": "🔧"
     },
-
     "administrator": {
         "name": "Administrator Application",
         "role_id": ADMIN_ROLE_ID,
@@ -33,13 +32,12 @@ TICKET_TYPES = {
 
 
 # ============================================================
-# TICKET SELECT
+# TICKET SELECT MENU
 # ============================================================
 
 class TicketSelect(discord.ui.Select):
 
     def __init__(self):
-
         options = [
             discord.SelectOption(
                 label="Staff Application",
@@ -47,7 +45,6 @@ class TicketSelect(discord.ui.Select):
                 emoji="🔧",
                 value="staff"
             ),
-
             discord.SelectOption(
                 label="Administrator Application",
                 description="Apply to become Administrator",
@@ -69,141 +66,167 @@ class TicketSelect(discord.ui.Select):
         ticket_type = self.values[0]
 
         if guild is None:
+            await interaction.response.send_message(
+                "❌ This can only be used inside a server.",
+                ephemeral=True
+            )
             return
 
-        # ====================================================
+        # --------------------------------------------------------
+        # ACKNOWLEDGE IMMEDIATELY
+        # --------------------------------------------------------
+
+        await interaction.response.defer(ephemeral=True)
+
+        # --------------------------------------------------------
         # CATEGORY
-        # ====================================================
+        # --------------------------------------------------------
 
         category = guild.get_channel(TICKET_CATEGORY_ID)
 
         if category is None:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ Ticket category was not found.",
                 ephemeral=True
             )
             return
 
-        # ====================================================
-        # EXISTING TICKET
-        # ====================================================
+        # --------------------------------------------------------
+        # CHECK EXISTING TICKET
+        # --------------------------------------------------------
 
         for channel in guild.text_channels:
 
             if channel.topic == f"ticket_owner:{member.id}":
 
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     f"❌ You already have a ticket: {channel.mention}",
                     ephemeral=True
                 )
-
                 return
 
-        # ====================================================
-        # ROLES
-        # ====================================================
+        # --------------------------------------------------------
+        # GET STAFF ROLE
+        # --------------------------------------------------------
 
         staff_role = guild.get_role(STAFF_ROLE_ID)
 
         if staff_role is None:
-
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ Staff role was not found.",
                 ephemeral=True
             )
-
             return
 
-        ticket_info = TICKET_TYPES[ticket_type]
+        ticket_info = TICKET_TYPES.get(ticket_type)
 
-        # ====================================================
+        if ticket_info is None:
+            await interaction.followup.send(
+                "❌ Invalid application type.",
+                ephemeral=True
+            )
+            return
+
+        # --------------------------------------------------------
         # PERMISSIONS
-        # ====================================================
+        # --------------------------------------------------------
 
         overwrites = {
+            guild.default_role: discord.PermissionOverwrite(
+                view_channel=False
+            ),
 
-            guild.default_role:
-                discord.PermissionOverwrite(
-                    view_channel=False
-                ),
+            member: discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True
+            ),
 
-            member:
-                discord.PermissionOverwrite(
-                    view_channel=True,
-                    send_messages=True,
-                    read_message_history=True
-                ),
-
-            staff_role:
-                discord.PermissionOverwrite(
-                    view_channel=True,
-                    send_messages=True,
-                    read_message_history=True,
-                    manage_messages=True
-                )
+            staff_role: discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True,
+                manage_messages=True
+            )
         }
 
-        # ====================================================
-        # CREATE CHANNEL
-        # ====================================================
+        # --------------------------------------------------------
+        # CREATE TICKET
+        # --------------------------------------------------------
 
         try:
 
             channel = await guild.create_text_channel(
-
                 name=f"{ticket_type}-{member.name}",
-
                 category=category,
-
                 topic=f"ticket_owner:{member.id}",
-
-                overwrites=overwrites
+                overwrites=overwrites,
+                reason=f"{ticket_info['name']} created by {member}"
             )
 
         except discord.Forbidden:
 
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ I don't have permission to create ticket channels.",
                 ephemeral=True
             )
-
             return
 
-        # ====================================================
+        except discord.HTTPException as e:
+
+            print(f"Ticket channel creation error: {e}")
+
+            await interaction.followup.send(
+                "❌ Discord could not create the ticket channel.",
+                ephemeral=True
+            )
+            return
+
+        # --------------------------------------------------------
         # TICKET EMBED
-        # ====================================================
+        # --------------------------------------------------------
+
+        application_name = ticket_info["name"].replace(
+            " Application",
+            ""
+        )
 
         embed = discord.Embed(
-
             title=f"{ticket_info['emoji']} {ticket_info['name']}",
-
             description=(
                 f"Welcome {member.mention}!\n\n"
-
                 f"**Application:** {ticket_info['name']}\n"
                 f"**Applicant:** {member.mention}\n\n"
-
-                "Please explain why you would be a good "
-                f"{ticket_info['name'].replace(' Application', '')}.\n\n"
-
+                f"Please explain why you would be a good "
+                f"**{application_name}**.\n\n"
                 "A Staff member will review your application."
             ),
-
             color=discord.Color.blurple()
         )
 
-        await channel.send(
-
-            content=member.mention,
-
-            embed=embed,
-
-            view=TicketControlView()
+        embed.set_footer(
+            text=f"Applicant ID: {member.id}"
         )
 
-        # ====================================================
-        # LOG
-        # ====================================================
+        # --------------------------------------------------------
+        # SEND TICKET MESSAGE
+        # --------------------------------------------------------
+
+        try:
+
+            await channel.send(
+                content=member.mention,
+                embed=embed,
+                view=TicketControlView()
+            )
+
+        except discord.HTTPException as e:
+
+            print(f"Ticket message error: {e}")
+
+        # --------------------------------------------------------
+        # LOG CHANNEL
+        # --------------------------------------------------------
 
         log_channel = guild.get_channel(
             TICKET_LOG_CHANNEL_ID
@@ -212,16 +235,13 @@ class TicketSelect(discord.ui.Select):
         if log_channel:
 
             log_embed = discord.Embed(
-
-                title="📋 New Staff Application",
-
+                title="📋 New Application",
                 description=(
                     f"**Applicant:** {member.mention}\n"
                     f"**Application:** {ticket_info['name']}\n"
                     f"**Ticket:** {channel.mention}\n"
                     "**Status:** 🟡 Pending"
                 ),
-
                 color=discord.Color.yellow()
             )
 
@@ -229,25 +249,28 @@ class TicketSelect(discord.ui.Select):
                 text=f"Applicant ID: {member.id}"
             )
 
-            await log_channel.send(
+            try:
 
-                embed=log_embed,
-
-                view=ApplicationDecisionView(
-
-                    applicant_id=member.id,
-
-                    role_id=ticket_info["role_id"],
-
-                    ticket_channel_id=channel.id
+                await log_channel.send(
+                    embed=log_embed,
+                    view=ApplicationDecisionView(
+                        applicant_id=member.id,
+                        role_id=ticket_info["role_id"],
+                        ticket_channel_id=channel.id
+                    )
                 )
-            )
 
-        await interaction.response.send_message(
+            except discord.HTTPException as e:
 
+                print(f"Log message error: {e}")
+
+        # --------------------------------------------------------
+        # FINAL RESPONSE
+        # --------------------------------------------------------
+
+        await interaction.followup.send(
             f"✅ Your application ticket has been created: "
             f"{channel.mention}",
-
             ephemeral=True
         )
 
@@ -259,20 +282,20 @@ class TicketSelect(discord.ui.Select):
 class TicketPanelView(discord.ui.View):
 
     def __init__(self):
-
         super().__init__(timeout=None)
 
-        self.add_item(TicketSelect())
+        self.add_item(
+            TicketSelect()
+        )
 
 
 # ============================================================
-# TICKET CONTROL
+# TICKET CONTROL VIEW
 # ============================================================
 
 class TicketControlView(discord.ui.View):
 
     def __init__(self):
-
         super().__init__(timeout=None)
 
     @discord.ui.button(
@@ -287,26 +310,35 @@ class TicketControlView(discord.ui.View):
         button: discord.ui.Button
     ):
 
-        staff_role = interaction.guild.get_role(
+        guild = interaction.guild
+
+        if guild is None:
+            return
+
+        staff_role = guild.get_role(
             STAFF_ROLE_ID
         )
 
-        if staff_role is None:
+        admin_role = guild.get_role(
+            ADMIN_ROLE_ID
+        )
+
+        is_staff = (
+            staff_role is not None
+            and staff_role in interaction.user.roles
+        )
+
+        is_admin = (
+            admin_role is not None
+            and admin_role in interaction.user.roles
+        )
+
+        if not is_staff and not is_admin:
 
             await interaction.response.send_message(
-                "❌ Staff role was not found.",
+                "❌ Only Staff or Administrators can close tickets.",
                 ephemeral=True
             )
-
-            return
-
-        if staff_role not in interaction.user.roles:
-
-            await interaction.response.send_message(
-                "❌ Only Staff can close tickets.",
-                ephemeral=True
-            )
-
             return
 
         await interaction.response.send_message(
@@ -314,11 +346,13 @@ class TicketControlView(discord.ui.View):
             ephemeral=True
         )
 
-        await interaction.channel.delete()
+        await interaction.channel.delete(
+            reason=f"Ticket closed by {interaction.user}"
+        )
 
 
 # ============================================================
-# APPLICATION DECISION
+# APPLICATION DECISION VIEW
 # ============================================================
 
 class ApplicationDecisionView(discord.ui.View):
@@ -336,15 +370,24 @@ class ApplicationDecisionView(discord.ui.View):
         self.role_id = role_id
         self.ticket_channel_id = ticket_channel_id
 
+    # --------------------------------------------------------
+    # STAFF CHECK
+    # --------------------------------------------------------
+
     def is_staff(self, member):
 
         staff_role = member.guild.get_role(
             STAFF_ROLE_ID
         )
 
+        admin_role = member.guild.get_role(
+            ADMIN_ROLE_ID
+        )
+
         return (
-            staff_role is not None
-            and staff_role in member.roles
+            (staff_role is not None and staff_role in member.roles)
+            or
+            (admin_role is not None and admin_role in member.roles)
         )
 
     # ========================================================
@@ -354,7 +397,8 @@ class ApplicationDecisionView(discord.ui.View):
     @discord.ui.button(
         label="Accept",
         style=discord.ButtonStyle.success,
-        emoji="✅"
+        emoji="✅",
+        custom_id="kazmod_application_accept"
     )
     async def accept(
         self,
@@ -365,111 +409,180 @@ class ApplicationDecisionView(discord.ui.View):
         if not self.is_staff(interaction.user):
 
             await interaction.response.send_message(
-                "❌ Only Staff can accept applications.",
+                "❌ Only Staff or Administrators can accept applications.",
                 ephemeral=True
             )
-
             return
 
-        member = interaction.guild.get_member(
-            self.applicant_id
+        # ----------------------------------------------------
+        # ACKNOWLEDGE IMMEDIATELY
+        # ----------------------------------------------------
+
+        await interaction.response.defer(
+            ephemeral=True
         )
 
-        role = interaction.guild.get_role(
-            self.role_id
+        guild = interaction.guild
+
+        if guild is None:
+            await interaction.followup.send(
+                "❌ Server not found.",
+                ephemeral=True
+            )
+            return
+
+        # ----------------------------------------------------
+        # FIND MEMBER
+        # ----------------------------------------------------
+
+        member = guild.get_member(
+            self.applicant_id
         )
 
         if member is None:
 
-            await interaction.response.send_message(
-                "❌ Applicant could not be found.",
-                ephemeral=True
-            )
+            try:
 
-            return
+                member = await guild.fetch_member(
+                    self.applicant_id
+                )
+
+            except discord.NotFound:
+
+                await interaction.followup.send(
+                    "❌ Applicant could not be found.",
+                    ephemeral=True
+                )
+                return
+
+            except discord.HTTPException:
+
+                await interaction.followup.send(
+                    "❌ Discord could not find the applicant.",
+                    ephemeral=True
+                )
+                return
+
+        # ----------------------------------------------------
+        # FIND ROLE
+        # ----------------------------------------------------
+
+        role = guild.get_role(
+            self.role_id
+        )
 
         if role is None:
 
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ Role could not be found.",
                 ephemeral=True
             )
-
             return
+
+        # ----------------------------------------------------
+        # ADD ROLE
+        # ----------------------------------------------------
 
         try:
 
             await member.add_roles(
                 role,
-                reason="Staff application accepted"
+                reason=f"Application accepted by {interaction.user}"
             )
 
         except discord.Forbidden:
 
-            await interaction.response.send_message(
-                "❌ I cannot give this role. "
-                "Move the bot's role above the role "
-                "it is trying to give.",
+            await interaction.followup.send(
+                "❌ I cannot give this role.\n\n"
+                "Make sure KazMod's highest role is above "
+                "the Staff/Administrator role.",
                 ephemeral=True
             )
-
             return
 
-        # ====================================================
-        # UPDATE LOG
-        # ====================================================
+        except discord.HTTPException as e:
 
-        embed = interaction.message.embeds[0]
+            print(f"Role error: {e}")
 
-        embed.description = (
+            await interaction.followup.send(
+                "❌ Discord could not give the role.",
+                ephemeral=True
+            )
+            return
 
-            f"**Applicant:** {member.mention}\n"
-            "**Status:** 🟢 ACCEPTED\n"
-            f"**Approved by:** {interaction.user.mention}\n"
-            f"**Role:** {role.mention}"
-        )
+        # ----------------------------------------------------
+        # UPDATE LOG EMBED
+        # ----------------------------------------------------
 
-        embed.color = discord.Color.green()
+        if interaction.message.embeds:
 
-        await interaction.message.edit(
-            embed=embed,
-            view=None
-        )
+            embed = interaction.message.embeds[0]
 
-        # ====================================================
-        # DM
-        # ====================================================
+            embed.description = (
+                f"**Applicant:** {member.mention}\n"
+                "**Status:** 🟢 ACCEPTED\n"
+                f"**Approved by:** {interaction.user.mention}\n"
+                f"**Role:** {role.mention}"
+            )
+
+            embed.color = discord.Color.green()
+
+            try:
+
+                await interaction.message.edit(
+                    embed=embed,
+                    view=None
+                )
+
+            except discord.HTTPException:
+                pass
+
+        # ----------------------------------------------------
+        # DM USER
+        # ----------------------------------------------------
 
         try:
 
             await member.send(
-
                 f"🎉 Your **{role.name}** application in "
-                f"**{interaction.guild.name}** was accepted!\n\n"
-
+                f"**{guild.name}** was accepted!\n\n"
                 f"You have received the **{role.name}** role."
             )
 
         except discord.Forbidden:
+
             pass
 
-        # ====================================================
-        # TICKET
-        # ====================================================
+        except discord.HTTPException:
 
-        ticket_channel = interaction.guild.get_channel(
+            pass
+
+        # ----------------------------------------------------
+        # UPDATE TICKET
+        # ----------------------------------------------------
+
+        ticket_channel = guild.get_channel(
             self.ticket_channel_id
         )
 
         if ticket_channel:
 
-            await ticket_channel.send(
+            try:
 
-                f"🎉 {member.mention}, your application was "
-                f"**accepted** by {interaction.user.mention}!"
-            )
+                await ticket_channel.send(
+                    f"🎉 {member.mention}, your application was "
+                    f"**accepted** by {interaction.user.mention}!"
+                )
 
-        await interaction.response.send_message(
+            except discord.HTTPException:
+
+                pass
+
+        # ----------------------------------------------------
+        # FINAL RESPONSE
+        # ----------------------------------------------------
+
+        await interaction.followup.send(
             "✅ Application accepted.",
             ephemeral=True
         )
@@ -481,7 +594,8 @@ class ApplicationDecisionView(discord.ui.View):
     @discord.ui.button(
         label="Deny",
         style=discord.ButtonStyle.danger,
-        emoji="❌"
+        emoji="❌",
+        custom_id="kazmod_application_deny"
     )
     async def deny(
         self,
@@ -492,69 +606,121 @@ class ApplicationDecisionView(discord.ui.View):
         if not self.is_staff(interaction.user):
 
             await interaction.response.send_message(
-                "❌ Only Staff can deny applications.",
+                "❌ Only Staff or Administrators can deny applications.",
                 ephemeral=True
             )
-
             return
 
-        member = interaction.guild.get_member(
+        # ----------------------------------------------------
+        # ACKNOWLEDGE IMMEDIATELY
+        # ----------------------------------------------------
+
+        await interaction.response.defer(
+            ephemeral=True
+        )
+
+        guild = interaction.guild
+
+        if guild is None:
+
+            await interaction.followup.send(
+                "❌ Server not found.",
+                ephemeral=True
+            )
+            return
+
+        # ----------------------------------------------------
+        # FIND MEMBER
+        # ----------------------------------------------------
+
+        member = guild.get_member(
             self.applicant_id
         )
 
-        embed = interaction.message.embeds[0]
+        # ----------------------------------------------------
+        # UPDATE EMBED
+        # ----------------------------------------------------
 
-        if member:
+        if interaction.message.embeds:
 
-            embed.description = (
+            embed = interaction.message.embeds[0]
 
-                f"**Applicant:** {member.mention}\n"
-                "**Status:** 🔴 DENIED\n"
-                f"**Denied by:** {interaction.user.mention}"
-            )
+            if member:
 
-        else:
+                embed.description = (
+                    f"**Applicant:** {member.mention}\n"
+                    "**Status:** 🔴 DENIED\n"
+                    f"**Denied by:** {interaction.user.mention}"
+                )
 
-            embed.description = (
+            else:
 
-                f"**Applicant ID:** `{self.applicant_id}`\n"
-                "**Status:** 🔴 DENIED\n"
-                f"**Denied by:** {interaction.user.mention}"
-            )
+                embed.description = (
+                    f"**Applicant ID:** `{self.applicant_id}`\n"
+                    "**Status:** 🔴 DENIED\n"
+                    f"**Denied by:** {interaction.user.mention}"
+                )
 
-        embed.color = discord.Color.red()
+            embed.color = discord.Color.red()
 
-        await interaction.message.edit(
-            embed=embed,
-            view=None
-        )
+            try:
+
+                await interaction.message.edit(
+                    embed=embed,
+                    view=None
+                )
+
+            except discord.HTTPException:
+
+                pass
+
+        # ----------------------------------------------------
+        # DM USER
+        # ----------------------------------------------------
 
         if member:
 
             try:
 
                 await member.send(
-
                     f"❌ Your application in "
-                    f"**{interaction.guild.name}** was denied."
+                    f"**{guild.name}** was denied."
                 )
 
             except discord.Forbidden:
+
                 pass
 
-            ticket_channel = interaction.guild.get_channel(
+            except discord.HTTPException:
+
+                pass
+
+            # ------------------------------------------------
+            # UPDATE TICKET
+            # ------------------------------------------------
+
+            ticket_channel = guild.get_channel(
                 self.ticket_channel_id
             )
 
             if ticket_channel:
 
-                await ticket_channel.send(
+                try:
 
-                    f"❌ {member.mention}, your application was "
-                    f"**denied** by {interaction.user.mention}."
-                )
+                    await ticket_channel.send(
+                        f"❌ {member.mention}, your application was "
+                        f"**denied** by {interaction.user.mention}."
+                    )
 
-        await interaction.response.send_message(
+                except discord.HTTPException:
+
+                    pass
+
+        # ----------------------------------------------------
+        # FINAL RESPONSE
+        # ----------------------------------------------------
+
+        await interaction.followup.send(
             "❌ Application denied.",
             ephemeral=True
         )
@@ -567,11 +733,11 @@ class ApplicationDecisionView(discord.ui.View):
 class Tickets(commands.Cog):
 
     def __init__(self, bot):
-
         self.bot = bot
 
     async def cog_load(self):
 
+        # Persistent views
         self.bot.add_view(
             TicketPanelView()
         )
@@ -579,6 +745,10 @@ class Tickets(commands.Cog):
         self.bot.add_view(
             TicketControlView()
         )
+
+    # --------------------------------------------------------
+    # READY
+    # --------------------------------------------------------
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -588,7 +758,6 @@ class Tickets(commands.Cog):
             "ticket_panel_created",
             False
         ):
-
             return
 
         self.bot.ticket_panel_created = True
@@ -596,7 +765,7 @@ class Tickets(commands.Cog):
         await self.create_ticket_panel()
 
     # ========================================================
-    # CREATE PANEL ONCE
+    # CREATE PANEL
     # ========================================================
 
     async def create_ticket_panel(self):
@@ -613,6 +782,10 @@ class Tickets(commands.Cog):
 
             return
 
+        # ----------------------------------------------------
+        # CHECK EXISTING PANEL
+        # ----------------------------------------------------
+
         try:
 
             async for message in channel.history(
@@ -620,11 +793,8 @@ class Tickets(commands.Cog):
             ):
 
                 if (
-
                     message.author == self.bot.user
-
                     and message.embeds
-
                     and message.embeds[0].title
                     == "🎫 Staff Applications"
                 ):
@@ -643,24 +813,29 @@ class Tickets(commands.Cog):
 
             return
 
+        except discord.HTTPException as e:
+
+            print(
+                f"❌ Could not check ticket panel: {e}"
+            )
+
+            return
+
+        # ----------------------------------------------------
+        # PANEL EMBED
+        # ----------------------------------------------------
+
         embed = discord.Embed(
-
             title="🎫 Staff Applications",
-
             description=(
-
                 "Want to join the staff team?\n\n"
-
                 "Select an application below to create "
                 "a private ticket.\n\n"
-
                 "🔧 **Staff Application**\n"
                 "Apply to become Staff.\n\n"
-
                 "🛡️ **Administrator Application**\n"
                 "Apply to become an Administrator."
             ),
-
             color=discord.Color.blurple()
         )
 
@@ -668,16 +843,33 @@ class Tickets(commands.Cog):
             text="KazMod Staff Applications"
         )
 
-        await channel.send(
+        # ----------------------------------------------------
+        # SEND PANEL
+        # ----------------------------------------------------
 
-            embed=embed,
+        try:
 
-            view=TicketPanelView()
-        )
+            await channel.send(
+                embed=embed,
+                view=TicketPanelView()
+            )
 
-        print(
-            "✅ Ticket panel created."
-        )
+            print(
+                "✅ Ticket panel created."
+            )
+
+        except discord.Forbidden:
+
+            print(
+                "❌ KazMod cannot send messages in "
+                "the ticket panel channel."
+            )
+
+        except discord.HTTPException as e:
+
+            print(
+                f"❌ Could not create ticket panel: {e}"
+            )
 
 
 # ============================================================
