@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 
 
 # ============================================================
-# LOAD ENVIRONMENT VARIABLES
+# LOAD ENVIRONMENT
 # ============================================================
 
 load_dotenv()
@@ -40,31 +40,43 @@ class KazMod(commands.Bot):
             intents=intents
         )
 
-    # ========================================================
-    # LOAD COGS
-    # ========================================================
-
     async def setup_hook(self):
 
+        print("🔄 Loading extensions...")
+
+        # ----------------------------------------------------
+        # TICKETS
+        # ----------------------------------------------------
+
         try:
+
             await self.load_extension("tickets")
+
             print("✅ tickets.py loaded")
 
         except Exception:
-            print("❌ tickets.py failed to load:")
+
+            print("❌ tickets.py FAILED to load:")
             traceback.print_exc()
 
+        # ----------------------------------------------------
+        # VERIFICATION
+        # ----------------------------------------------------
+
         try:
+
             await self.load_extension("verification")
+
             print("✅ verification.py loaded")
 
         except Exception:
-            print("❌ verification.py failed to load:")
+
+            print("❌ verification.py FAILED to load:")
             traceback.print_exc()
 
-        # ====================================================
-        # SYNC COMMANDS
-        # ====================================================
+        # ----------------------------------------------------
+        # SYNC SLASH COMMANDS
+        # ----------------------------------------------------
 
         try:
 
@@ -81,7 +93,7 @@ class KazMod(commands.Bot):
 
 
 # ============================================================
-# BOT
+# CREATE BOT
 # ============================================================
 
 bot = KazMod()
@@ -97,12 +109,31 @@ async def on_ready():
     print("====================================")
     print(f"✅ Logged in as {bot.user}")
     print(f"🆔 Bot ID: {bot.user.id}")
-    print("====================================")
     print("🤖 KazMod is ready!")
+    print("====================================")
 
 
 # ============================================================
-# START BOT
+# ERROR HANDLER
 # ============================================================
 
-bot.run(TOKEN)
+@bot.event
+async def on_error(event, *args, **kwargs):
+
+    print(f"❌ Discord event error: {event}")
+
+    traceback.print_exc()
+
+
+# ============================================================
+# START
+# ============================================================
+
+try:
+
+    bot.run(TOKEN)
+
+except Exception:
+
+    print("❌ BOT CRASHED:")
+    traceback.print_exc()
